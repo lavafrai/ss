@@ -1,0 +1,89 @@
+name: Platform builds
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Commit or tag to check out
+        type: string
+        default: ''
+      version:
+        description: Version used in binary filenames
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - runner: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+          - runner: macos-15
+            target: aarch64-apple-darwin
+          - runner: windows-2025
+            target: x86_64-pc-windows-msvc
+          - runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+    env:
+      CARGO_TERM_COLOR: always
+      BUILD_TARGET: ${{ matrix.target }}
+      BUILD_VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Clippy
+        run: cargo clippy --locked --all-targets --target "$BUILD_TARGET" -- -D warnings
+
+      - name: Rust tests (including Windows console events)
+        run: cargo test --locked --all-targets --target "$BUILD_TARGET"
+
+      - name: Build release binary
+        run: cargo build --locked --release --target "$BUILD_TARGET"
+
+      - name: Prepare release binary
+        id: binary
+        run: |
+          suffix=""
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            suffix=".exe"
+          fi
+          mkdir -p dist
+          binary="dist/ss-$BUILD_VERSION-$BUILD_TARGET$suffix"
+          cp "target/$BUILD_TARGET/release/ss$suffix" "$binary"
+          printf 'path=%s\n' "$binary" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ss-${{ matrix.target }}
+          path: ${{ steps.binary.outputs.path }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14

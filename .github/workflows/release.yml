@@ -1,0 +1,85 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag, such as v0.1.0
+        type: string
+        required: true
+      upload:
+        description: Attach binaries to the existing GitHub release
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  version:
+    name: Check release version
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      ref: ${{ steps.version.outputs.ref }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+
+      - name: Match the tag to Cargo.toml
+        id: version
+        run: python scripts/release_version.py "$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+
+      - run: cargo fmt --all --check
+
+  build:
+    name: Release tests and builds
+    needs: version
+    uses: ./.github/workflows/build.yml
+    with:
+      ref: ${{ needs.version.outputs.ref }}
+      version: ${{ needs.version.outputs.version }}
+
+  publish:
+    name: Upload release assets
+    if: github.event_name == 'release' || inputs.upload
+    needs: [version, build]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: ss-*
+          path: dist
+          merge-multiple: true
+
+      - name: Upload all platforms
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$RELEASE_TAG" dist/ss-* --clobber --repo "$GITHUB_REPOSITORY"
