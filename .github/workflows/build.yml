@@ -62,7 +62,7 @@ jobs:
       - name: Clippy
         run: cargo clippy --locked --all-targets --target "$BUILD_TARGET" -- -D warnings
 
-      - name: Rust tests (including Windows console events)
+      - name: Rust tests
         run: cargo test --locked --all-targets --target "$BUILD_TARGET"
 
       - name: Build release binary
