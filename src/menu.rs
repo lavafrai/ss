@@ -61,6 +61,7 @@ fn colors_enabled() -> bool {
 fn menu_options(use_colors: bool) -> AppResult<SkimOptions> {
     let options = SkimOptionsBuilder::default()
         .reverse(true)
+        .cycle(true)
         .border(BorderType::Rounded)
         .margin("1,2")
         .prompt("SSH: ")
